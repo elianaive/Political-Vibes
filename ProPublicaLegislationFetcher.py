@@ -26,33 +26,46 @@ class ProPublicaLegislationFetcher:
             if self.is_fetching:
                 return
             self.is_fetching = True
-            self.page += 1
+            # Adjust for pagination offset
+            offset = self.page * 20  # Assuming 20 items per page
 
         try:
-            url = f"{self.base_url}/{self.congress}/bills/introduced.json?page={self.page}"
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()  # Raises HTTPError for bad responses
+            print("sending request")
+            # Correct URL with chamber and type of bills (introduced)
+            url = f"{self.base_url}/{self.congress}/both/bills/introduced.json?offset={offset}"
+            print(url)
+            response = requests.get(url, headers=self.headers, timeout=10)
+            print(response.text)
+            response.raise_for_status()
 
             with self.data_lock:
                 data = response.json()
-                if not data['results'][0]['bills']:  # Check if the list of bills is empty
-                    self.finished = True  # No more bills to fetch
+                if not data['results'][0]['bills']:
+                    self.finished = True
                 self.bills.extend(data['results'][0]['bills'])
+                if len(data['results'][0]['bills']) < 20:
+                    self.finished = True  # Assuming less than 20 bills means we've hit the last page
         except requests.exceptions.RequestException as e:
             with self.data_lock:
                 print(f"Failed to fetch data: {e}")
-                self.page -= 1  # Revert page increment if fetch failed
+                if self.page > 0:
+                    self.page -= 1  # Only revert if we're not on the first page
         finally:
             with self.data_lock:
                 self.is_fetching = False
 
+
     def next_bill(self):
+        print("next bill")
         while True:
             with self.data_lock:
+                print("locked")
                 if not self.bills and not self.is_fetching and not self.finished:
+                    print ("fetch bills")
                     self.fetch_bills()
                     continue
                 if self.bills:
+                    print("pop")
                     return self.bills.pop(0)
                 if self.finished:
                     return None
@@ -62,6 +75,7 @@ def run_test(congress, api_key, num_threads=5, num_items=10):
 
     def process_bill(progress):
         bill = fetcher.next_bill()
+        print(bill)
         if bill:
             progress.update(1)
             print(f"Fetched bill: {bill['bill_id']} - {bill['title']}")
@@ -79,5 +93,7 @@ if __name__ == "__main__":
     print(f"API Key: {api_key}")
     if not api_key:
         raise EnvironmentError("PROPUBLICA_API_KEY environment variable not set.")
-    congress = "117"  # Example Congress number
+    congress = "117"
+    fetcher = ProPublicaLegislationFetcher(api_key, congress)
+    fetcher.fetch_bills()  # Test direct call
     run_test(congress, api_key)
