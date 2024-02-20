@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 import xml.etree.ElementTree as ET
+import re
 
 load_dotenv()
 
@@ -29,10 +30,47 @@ class CongressGovLegislationFetcher:
         from_date = f"{start_year}-01-03T00:00:00Z"
         to_date = f"{end_year}-01-03T00:00:00Z"
         return from_date, to_date
-
+    
     def get_bill_text(self, congress, bill_number, origin):
+
+        def get_bill_text_url(bill_type, bill_number):
+            # Constructing the URL with parameters
+            url = f"https://api.congress.gov/v3/bill/{self.congress}/{bill_type}/{bill_number}/text?format=json&api_key={self.api_key}"
+            
+            # Making the API request
+            response = requests.get(url)
+            
+            # Checking if the request was successful
+            if response.status_code == 200:
+                data = response.json()
+                xml_urls = []
+                
+                # Looping through text versions to find all XML URLs
+                for version in data.get('textVersions', []):
+                    for format in version.get('formats', []):
+                        if format.get('type') == "Formatted XML":
+                            xml_urls.append(format.get('url'))
+                
+                # Extracting integers from URLs and finding the highest value
+                highest_url = None
+                highest_value = -1
+                for url in xml_urls:
+                    # Extracting numbers from the URL
+                    numbers = re.findall(r'\d+', url)
+                    if numbers:
+                        # Assuming the last number in the URL is the relevant one
+                        current_value = int(numbers[-1])
+                        if current_value > highest_value:
+                            highest_value = current_value
+                            highest_url = url
+                
+                return highest_url
+            else:
+                print(f"Failed to fetch data: HTTP {response.status_code}")
+                return None
         origin_code = 's' if origin == 'S' else 'hr' if origin == 'H' else origin
-        url = f"https://www.congress.gov/{self.congress}/bills/{origin_code}{bill_number}/BILLS-{self.congress}{origin_code}{bill_number}i{origin.lower()}.xml"
+        #url = f"https://www.congress.gov/{self.congress}/bills/{origin_code}{bill_number}/BILLS-{self.congress}{origin_code}{bill_number}i{origin.lower()}.xml"
+        url = get_bill_text_url(origin_code, bill_number)
         response = requests.get(url)
 
         if response.status_code == 200:
@@ -60,7 +98,7 @@ class CongressGovLegislationFetcher:
 
     def fetch_bill_text_concurrently(self, bills_data):
         with ThreadPoolExecutor() as executor:
-            future_to_bill = {executor.submit(self.get_bill_text, self.congress, bill['bill']['number'], bill['bill']['originChamberCode']): bill for bill in bills_data}
+            future_to_bill = {executor.submit(self.get_bill_text, congress, bill['bill']['number'], bill['bill']['originChamberCode']): bill for bill in bills_data}
             for future in as_completed(future_to_bill):
                 bill = future_to_bill[future]
                 try:
@@ -165,6 +203,42 @@ def run_test(congress, api_key, num_threads=5, num_items=10):
     bills_df.to_csv("data/bills.csv", index=False)
     with open("test.txt", "w", encoding="utf-8") as file:
         file.write(bills_df.iloc[0]['text'])
+
+def get_bill_text_url(congress, bill_type, bill_number, api_key):
+    # Constructing the URL with parameters
+    url = f"https://api.congress.gov/v3/bill/{congress}/{bill_type}/{bill_number}/text?format=json&api_key={api_key}"
+    
+    # Making the API request
+    response = requests.get(url)
+    
+    # Checking if the request was successful
+    if response.status_code == 200:
+        data = response.json()
+        xml_urls = []
+        
+        # Looping through text versions to find all XML URLs
+        for version in data.get('textVersions', []):
+            for format in version.get('formats', []):
+                if format.get('type') == "Formatted XML":
+                    xml_urls.append(format.get('url'))
+        
+        # Extracting integers from URLs and finding the highest value
+        highest_url = None
+        highest_value = -1
+        for url in xml_urls:
+            # Extracting numbers from the URL
+            numbers = re.findall(r'\d+', url)
+            if numbers:
+                # Assuming the last number in the URL is the relevant one
+                current_value = int(numbers[-1])
+                if current_value > highest_value:
+                    highest_value = current_value
+                    highest_url = url
+        
+        return highest_url
+    else:
+        print(f"Failed to fetch data: HTTP {response.status_code}")
+        return None
 
 if __name__ == "__main__":
     api_key = os.getenv('CONGRESSGOV_API_KEY')
