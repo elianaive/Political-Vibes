@@ -7,6 +7,7 @@ import os
 import pandas as pd
 import xml.etree.ElementTree as ET
 import re
+import backoff
 
 load_dotenv()
 
@@ -21,7 +22,7 @@ class CongressGovLegislationFetcher:
         self.is_fetching = False
         self.page = 0
         self.finished = False
-        self.limit = 250 if ((max > 250) or max == -1) else max
+        self.limit = 50 if ((max > 250) or max == -1) else max
 
     @staticmethod
     def calculate_congress_date_range(congress):
@@ -31,8 +32,10 @@ class CongressGovLegislationFetcher:
         to_date = f"{end_year}-01-03T00:00:00Z"
         return from_date, to_date
     
+    #@backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=8)
     def get_bill_text(self, congress, bill_number, origin):
 
+        #@backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=8)
         def get_bill_text_url(bill_type, bill_number):
             # Constructing the URL with parameters
             url = f"https://api.congress.gov/v3/bill/{self.congress}/{bill_type}/{bill_number}/text?format=json&api_key={self.api_key}"
@@ -108,6 +111,7 @@ class CongressGovLegislationFetcher:
                     print(f'{bill["bill"]["number"]} generated an exception: {exc}')
                     bill['text'] = None
 
+    #@backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=8)
     def fetch_bills(self):
         while not self.finished:
             with self.condition:
@@ -121,6 +125,12 @@ class CongressGovLegislationFetcher:
 
             try:
                 response = requests.get(url, timeout=10)
+                if 'X-RateLimit-Reset' in response.headers:
+                    reset_time = int(response.headers['X-RateLimit-Reset'])
+                    current_time = int(time.time())
+                    sleep_time = reset_time - current_time
+                    if sleep_time > 0:
+                        time.sleep(sleep_time + 1) 
                 response.raise_for_status()
                 data = response.json()
                 bills_data = data.get('summaries', [])
@@ -155,7 +165,7 @@ class CongressGovLegislationFetcher:
                 return self.bills.pop(0)
             return None
 
-def run_test(congress, api_key, num_threads=5, num_items=10):
+def run_test(congress, api_key, num_threads=2, num_items=10):
     fetcher = CongressGovLegislationFetcher(api_key=api_key, congress=congress, max=num_items)
     bills = []
 
@@ -200,9 +210,7 @@ def run_test(congress, api_key, num_threads=5, num_items=10):
 
     print(f"Total bills fetched: {len(bills)}")
     bills_df = pd.DataFrame(bills)
-    bills_df.to_csv("data/bills.csv", index=False)
-    with open("test.txt", "w", encoding="utf-8") as file:
-        file.write(bills_df.iloc[0]['text'])
+    bills_df.to_csv("data/bills_117_test.csv", index=False)
 
 def get_bill_text_url(congress, bill_type, bill_number, api_key):
     # Constructing the URL with parameters
@@ -245,4 +253,4 @@ if __name__ == "__main__":
     if not api_key:
         raise EnvironmentError("CONGRESSGOV_API_KEY environment variable not set.")
     congress = "117"
-    run_test(congress, api_key, num_items=-1)
+    run_test(congress, api_key, num_items=10)
