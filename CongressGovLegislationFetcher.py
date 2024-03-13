@@ -253,4 +253,4 @@ if __name__ == "__main__":
     if not api_key:
         raise EnvironmentError("CONGRESSGOV_API_KEY environment variable not set.")
     congress = "117"
-    run_test(congress, api_key, num_items=10)
+    run_test(congress, api_key, num_items=250)
