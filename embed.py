@@ -38,6 +38,6 @@ print(encoded_vectors[0])
 print(len(encoded_vectors[0]))
 
 # Save the encoded vectors and bill numbers to an HDF5 file
-with h5py.File('data/encoded_vectors.h5', 'w') as hf:
+with h5py.File('data/encoded_summaries.h5', 'w') as hf:
     hf.create_dataset('vectors', data=encoded_vectors)
     hf.create_dataset('bill_info', data=np.array(bill_info, dtype='S'))  # Saving as bytes
